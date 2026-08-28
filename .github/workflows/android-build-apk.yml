@@ -28,7 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'pnpm'
 
       - name: Enable Corepack and ensure pnpm (with npm fallback)
         run: |
@@ -37,7 +36,6 @@ jobs:
           corepack enable || true
           echo "Preparing pnpm via corepack..."
           corepack prepare pnpm@9.0.2 --activate || true
-          # If corepack didn't provide pnpm, install via npm as fallback
           if ! command -v pnpm >/dev/null 2>&1; then
             echo "corepack did not provide pnpm; installing globally via npm..."
             npm install -g pnpm@9
