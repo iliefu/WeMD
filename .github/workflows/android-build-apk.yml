@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-apk:
-    name: Build APK (Capacitor - debug)
+    name: Build APK (Capacitor - debug + diagnostics)
     runs-on: ubuntu-latest
 
     steps:
@@ -24,22 +24,15 @@ jobs:
       - name: Export runner temp as ANDROID_SDK_ROOT
         run: echo "ANDROID_SDK_ROOT=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
 
-      - name: Set up Node.js 
+      - name: Set up Node.js (Node 24)
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
-      - name: Enable Corepack and ensure pnpm (with npm fallback)
-        run: |
-          set -e
-          echo "Enabling corepack..."
-          corepack enable || true
-          echo "Preparing pnpm via corepack..."
-          corepack prepare pnpm@9.0.2 --activate || true
-          if ! command -v pnpm >/dev/null 2>&1; then
-            echo "corepack did not provide pnpm; installing globally via npm..."
-            npm install -g pnpm@9
-          fi
+      - name: Setup pnpm (official action)
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
 
       - name: Check pnpm & node (diagnostics)
         run: |
@@ -68,39 +61,55 @@ jobs:
 
       - name: Install Capacitor CLI & Android platform
         run: |
-          # 在 workspace 根安装 Capacitor CLI 与 Android 平台包（使用 pnpm）
           pnpm add -w @capacitor/cli@latest @capacitor/android@latest
 
       - name: Initialize Capacitor (if missing) and add Android (use pnpm exec)
         run: |
           set -e
-          # 如果没有配置文件则初始化（非破坏性）
           if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
             pnpm exec cap init "WeMD" "com.iliefu.wemd" --web-dir=apps/web/dist
           fi
-          # 如果 android 平台目录不存在，则添加
           if [ ! -d android ]; then
             pnpm exec cap add android
           fi
           pnpm exec cap copy android
 
-      - name: Gradle diagnostics and build (detailed)
+      - name: Gradle diagnostics, ensure local.properties and wrapper, then build
         working-directory: android
         run: |
           set -e
-          echo "=== ENV ==="
+          echo "=> Ensure local.properties points to SDK"
+          if [ -z "${ANDROID_SDK_ROOT:-}" ]; then
+            echo "ANDROID_SDK_ROOT is not set" >&2
+            exit 1
+          fi
+          # write local.properties so Gradle can find Android SDK
+          echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
+          cat local.properties
+
+          # Fix gradle wrapper to a stable 8.x if needed
+          WRAPPER_FILE="gradle/wrapper/gradle-wrapper.properties"
+          if [ -f "$WRAPPER_FILE" ]; then
+            echo "Setting Gradle wrapper distribution to gradle-8.4-all.zip"
+            sed -i 's|^distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.4-all.zip|' "$WRAPPER_FILE" || true
+          fi
+
+          chmod +x ./gradlew || true
+
+          echo "=== JAVA / GRADLE DIAGNOSTICS ==="
           echo "JAVA_HOME=$JAVA_HOME"
           java -version || true
-          echo "Gradle wrapper properties:"
-          cat gradle/wrapper/gradle-wrapper.properties || true
-          echo "Gradle wrapper --version:"
           ./gradlew --version || true
-          echo "List Android SDK:"
+
+          echo "=== Android SDK list (top-level) ==="
           ls -la "$ANDROID_SDK_ROOT" || true
           ls -la "$ANDROID_SDK_ROOT/platforms" || true
-          echo "---- Attempt to run dependency resolution ----"
-          ./gradlew app:dependencies --no-daemon --stacktrace --info || true
-          echo "---- Attempt to build (debug) ----"
+
+          echo "=== Try resolving dependencies (debug compile/runtime) ==="
+          ./gradlew :app:dependencies --configuration debugCompileClasspath --no-daemon --stacktrace --info || true
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon --stacktrace --info || true
+
+          echo "=== Attempt to build debug with stacktrace/info ==="
           ./gradlew assembleDebug --no-daemon --stacktrace --info
 
       - id: find_apk
