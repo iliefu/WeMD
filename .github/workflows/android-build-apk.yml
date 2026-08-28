@@ -66,19 +66,23 @@ jobs:
       - name: Build web (apps/web)
         run: pnpm --filter @wemd/web run build
 
-      - name: Install Capacitor CLI
-        run: pnpm add -w --workspace-root @capacitor/cli@latest
+      - name: Install Capacitor CLI & Android platform
+        run: |
+          # 在 workspace 根安装 Capacitor CLI 与 Android 平台包（使用 pnpm）
+          pnpm add -w @capacitor/cli@latest @capacitor/android@latest
 
-      - name: Initialize Capacitor (if missing) and add Android
+      - name: Initialize Capacitor (if missing) and add Android (use pnpm exec)
         run: |
           set -e
+          # 如果没有配置文件则初始化（非破坏性）
           if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
-            npx cap init "WeMD" "com.iliefu.wemd" --web-dir=apps/web/dist
+            pnpm exec cap init "WeMD" "com.iliefu.wemd" --web-dir=apps/web/dist
           fi
+          # 如果 android 平台目录不存在，则添加
           if [ ! -d android ]; then
-            npx cap add android
+            pnpm exec cap add android
           fi
-          npx cap copy android
+          pnpm exec cap copy android
 
       - name: Build Android debug APK
         working-directory: android
