@@ -84,11 +84,24 @@ jobs:
           fi
           pnpm exec cap copy android
 
-      - name: Build Android debug APK
+      - name: Gradle diagnostics and build (detailed)
         working-directory: android
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          set -e
+          echo "=== ENV ==="
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version || true
+          echo "Gradle wrapper properties:"
+          cat gradle/wrapper/gradle-wrapper.properties || true
+          echo "Gradle wrapper --version:"
+          ./gradlew --version || true
+          echo "List Android SDK:"
+          ls -la "$ANDROID_SDK_ROOT" || true
+          ls -la "$ANDROID_SDK_ROOT/platforms" || true
+          echo "---- Attempt to run dependency resolution ----"
+          ./gradlew app:dependencies --no-daemon --stacktrace --info || true
+          echo "---- Attempt to build (debug) ----"
+          ./gradlew assembleDebug --no-daemon --stacktrace --info
 
       - id: find_apk
         name: Find debug APK
