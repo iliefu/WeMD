@@ -6,6 +6,9 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch: {}
 
+permissions: 
+  contents: write
+  
 jobs:
   build-apk:
     name: Build APK (Capacitor - debug + diagnostics)
@@ -123,3 +126,27 @@ jobs:
         with:
           name: wemd-apk
           path: ${{ steps.find_apk.outputs.apk_path }}
+
+      - name: Create GitHub release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # 如果是 tag-trigger 的 workflow，用 ${{ github.ref_name }}
+          tag_name: "ci-${{ github.run_number }}"         # 或: ${{ github.ref_name }} 当 push tag 时
+          release_name: "CI build ${{ github.run_number }}"
+          body: "Automated release from GitHub Actions run ${{ github.run_id }}."
+          draft: false
+          prerelease: false
+
+      - name: Upload APK to release
+        if: ${{ steps.find_apk.outputs.apk_path != '' }}
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_apk.outputs.apk_path }}
+          asset_name: app-debug.apk                          # 上传到 Release 的文件名，按需改
+          asset_content_type: application/vnd.android.package-archive
