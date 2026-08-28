@@ -90,8 +90,8 @@ jobs:
           # Fix gradle wrapper to a stable 8.x if needed
           WRAPPER_FILE="gradle/wrapper/gradle-wrapper.properties"
           if [ -f "$WRAPPER_FILE" ]; then
-            echo "Setting Gradle wrapper distribution to gradle-8.4-all.zip"
-            sed -i 's|^distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.4-all.zip|' "$WRAPPER_FILE" || true
+            echo "Setting Gradle wrapper distribution to gradle-8.13-all.zip"
+            sed -i 's|^distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' "$WRAPPER_FILE" || true
           fi
 
           chmod +x ./gradlew || true
