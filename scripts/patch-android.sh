@@ -11,8 +11,22 @@ MAIN_ACTIVITY_JAVA="${PACKAGE_DIR}/MainActivity.java"
 
 echo "Patching Android project..."
 
-# 1) Insert intent-filter into AndroidManifest.xml inside the main activity if not present
-if [ -f "$MANIFEST_FILE" ]; then
+# Ensure manifest exists
+if [ ! -f "$MANIFEST_FILE" ]; then
+  echo "Warning: $MANIFEST_FILE not found. Skipping manifest patch."
+else
+  # Ensure activity has android:exported="true" if it has an intent-filter (Android 12+ requirement)
+  if ! grep -q "android:exported" "$MANIFEST_FILE" 2>/dev/null || true; then
+    echo "Adding android:exported=\"true\" to the first <activity> tag (if missing)"
+    # Add the exported attribute to the first <activity ...> opening tag that doesn't already include android:exported
+    sed -E -n '1,/<activity/ p' "$MANIFEST_FILE" >/dev/null 2>&1 || true
+    # Use sed to replace the first <activity ...> occurrence
+    sed -E -i '0,/<activity/ s#<activity([^>]*)>#<activity\1 android:exported="true">#' "$MANIFEST_FILE" || true
+  else
+    echo "Manifest already contains android:exported somewhere; will not force-add."
+  fi
+
+  # Insert VIEW intent-filter if not present
   if ! grep -q "wemd-file-open-filter" "$MANIFEST_FILE" 2>/dev/null || true; then
     awk '
     BEGIN{printed=0}
@@ -33,15 +47,36 @@ if [ -f "$MANIFEST_FILE" ]; then
     }
     { print }
     ' "$MANIFEST_FILE" > "${MANIFEST_FILE}.patched" && mv "${MANIFEST_FILE}.patched" "${MANIFEST_FILE}"
-    echo "Inserted intent-filter into $MANIFEST_FILE"
+    echo "Inserted VIEW intent-filter into $MANIFEST_FILE"
   else
-    echo "Intent-filter already present in $MANIFEST_FILE"
+    echo "VIEW intent-filter already present in $MANIFEST_FILE"
   fi
-else
-  echo "Warning: $MANIFEST_FILE not found. Skipping manifest patch."
+
+  # Insert SEND intent-filter for ACTION_SEND (sharing) if not present
+  if ! grep -q "wemd-file-send-filter" "$MANIFEST_FILE" 2>/dev/null || true; then
+    awk '
+    BEGIN{printed=0}
+    /<activity/ && printed==0 { print; inside=1; next }
+    inside==1 && /<\/activity>/ {
+      print "      <!-- wemd-file-send-filter -->"
+      print "      <intent-filter android:label=\"WeMD Receive Shared Markdown\">"
+      print "        <action android:name=\"android.intent.action.SEND\" />"
+      print "        <category android:name=\"android.intent.category.DEFAULT\" />"
+      print "        <data android:mimeType=\"text/markdown\" />"
+      print "        <data android:mimeType=\"text/*\" />"
+      print "        <data android:mimeType=\"application/octet-stream\" />"
+      print "      </intent-filter>"
+      printed=1
+    }
+    { print }
+    ' "$MANIFEST_FILE" > "${MANIFEST_FILE}.patched" && mv "${MANIFEST_FILE}.patched" "${MANIFEST_FILE}"
+    echo "Inserted SEND intent-filter into $MANIFEST_FILE"
+  else
+    echo "SEND intent-filter already present in $MANIFEST_FILE"
+  fi
 fi
 
-# 2) Append intent handling helpers to MainActivity (Kotlin preferred, then Java)
+# 2) Modify MainActivity to handle VIEW and SEND intents (Kotlin preferred, then Java)
 if [ -f "$MAIN_ACTIVITY_KT" ]; then
   if ! grep -q "// --- WeMD: support opening .md from external apps ---" "$MAIN_ACTIVITY_KT" 2>/dev/null || true; then
     cat >> "$MAIN_ACTIVITY_KT" <<'KOTLIN'
@@ -49,15 +84,28 @@ if [ -f "$MAIN_ACTIVITY_KT" ]; then
     // --- WeMD: support opening .md from external apps ---
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
-        intent?.data?.let { uri ->
-            handleIncomingFile(uri)
-        }
+        handleIncomingIntent(intent)
     }
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
-        intent?.data?.let { uri ->
-            handleIncomingFile(uri)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: android.content.Intent?) {
+        if (intent == null) return
+        try {
+            val action = intent.action
+            var uri: android.net.Uri? = null
+            if (action == android.content.Intent.ACTION_VIEW) {
+                uri = intent.data
+            } else if (action == android.content.Intent.ACTION_SEND) {
+                @Suppress("DEPRECATION")
+                uri = intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM) as? android.net.Uri
+            }
+            uri?.let { handleIncomingFile(it) }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -92,16 +140,30 @@ elif [ -f "$MAIN_ACTIVITY_JAVA" ]; then
     @Override
     public void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
-        if (intent != null && intent.getData() != null) {
-            handleIncomingFile(intent.getData());
-        }
+        handleIncomingIntent(intent);
     }
 
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (getIntent() != null && getIntent().getData() != null) {
-            handleIncomingFile(getIntent().getData());
+        handleIncomingIntent(getIntent());
+    }
+
+    private void handleIncomingIntent(android.content.Intent intent) {
+        if (intent == null) return;
+        try {
+            String action = intent.getAction();
+            android.net.Uri uri = null;
+            if (android.content.Intent.ACTION_VIEW.equals(action)) {
+                uri = intent.getData();
+            } else if (android.content.Intent.ACTION_SEND.equals(action)) {
+                uri = intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM);
+            }
+            if (uri != null) {
+                handleIncomingFile(uri);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
